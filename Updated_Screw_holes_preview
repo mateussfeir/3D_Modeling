@@ -1,0 +1,434 @@
+import bpy
+from mathutils import Vector
+from math import radians
+
+# ============================================================
+# TWO SCREW HOLES — LOCKING KEYHOLE PREVIEW
+#
+# OUTER / VISIBLE:
+#   Bottom entry circle: 8 mm
+#   Upper locking slot: 4 mm
+#   Depth: 2 mm
+#
+# INNER / HIDDEN:
+#   Bottom entry circle: 8 mm
+#   Upper channel: 8 mm
+#   Depth: 4 mm behind the outer recess
+#
+# Preview only — this does NOT cut the car.
+# ============================================================
+
+CAR_NAME = "compact car 3d model"
+COLLECTION_NAME = "SCREW_HOLE_PREVIEW"
+
+# ------------------------------------------------------------
+# PLACEMENT
+# ------------------------------------------------------------
+
+# Distance between the two screw-hole centers
+CENTER_DISTANCE_MM = 100.0
+
+# Distance from the top of the car to the top of the slot
+TOP_MARGIN_MM = 18.0
+
+# Distance from the bottom-circle center to the top of the slot
+SLOT_LENGTH_MM = 12.0
+
+# ------------------------------------------------------------
+# OUTER VISIBLE RECESS
+# ------------------------------------------------------------
+
+OUTER_ENTRY_DIAMETER_MM = 8.0
+OUTER_SLOT_WIDTH_MM = 4.0
+OUTER_TOP_RADIUS_MM = 2.0
+OUTER_DEPTH_MM = 2.0
+
+# ------------------------------------------------------------
+# INNER HIDDEN CHANNEL
+# ------------------------------------------------------------
+
+INNER_ENTRY_DIAMETER_MM = 8.0
+INNER_SLOT_WIDTH_MM = 8.0
+INNER_TOP_RADIUS_MM = 4.0
+INNER_DEPTH_MM = 4.0
+
+# Back face visible in Left Orthographic
+FACE_SIDE = "MIN_X"
+
+# Small overlap for clean Boolean operations later
+OVERLAP_MM = 0.20
+
+
+# ============================================================
+# MILLIMETRE CONVERSION
+# ============================================================
+
+scene_scale = bpy.context.scene.unit_settings.scale_length
+
+if scene_scale <= 0:
+    scene_scale = 1.0
+
+
+def mm(value):
+    return (value / 1000.0) / scene_scale
+
+
+# ============================================================
+# GET CAR
+# ============================================================
+
+car = bpy.data.objects.get(CAR_NAME)
+
+if car is None:
+    car = bpy.context.active_object
+
+if car is None or car.type != "MESH":
+    raise RuntimeError(
+        'Select the car mesh or name it "compact car 3d model".'
+    )
+
+
+# ============================================================
+# DELETE OLD PREVIEW
+# ============================================================
+
+old_collection = bpy.data.collections.get(COLLECTION_NAME)
+
+if old_collection:
+    for obj in list(old_collection.objects):
+        bpy.data.objects.remove(obj, do_unlink=True)
+
+    bpy.data.collections.remove(old_collection)
+
+
+# ============================================================
+# CREATE PREVIEW COLLECTION
+# ============================================================
+
+preview_collection = bpy.data.collections.new(COLLECTION_NAME)
+bpy.context.scene.collection.children.link(preview_collection)
+
+
+def move_to_preview_collection(obj):
+    for collection in list(obj.users_collection):
+        collection.objects.unlink(obj)
+
+    preview_collection.objects.link(obj)
+
+
+# ============================================================
+# GET CAR WORLD BOUNDS
+# ============================================================
+
+corners = [
+    car.matrix_world @ Vector(corner)
+    for corner in car.bound_box
+]
+
+min_x = min(point.x for point in corners)
+max_x = max(point.x for point in corners)
+
+min_y = min(point.y for point in corners)
+max_y = max(point.y for point in corners)
+
+min_z = min(point.z for point in corners)
+max_z = max(point.z for point in corners)
+
+center_y = (min_y + max_y) / 2.0
+
+left_hole_y = center_y - mm(CENTER_DISTANCE_MM / 2.0)
+right_hole_y = center_y + mm(CENTER_DISTANCE_MM / 2.0)
+
+# Top of the narrow locking slot
+slot_top_z = max_z - mm(TOP_MARGIN_MM)
+
+# Large 8 mm entry circle is below the slot
+entry_circle_z = slot_top_z - mm(SLOT_LENGTH_MM)
+
+# Center of the rectangular channel between top and entry circle
+slot_center_z = (slot_top_z + entry_circle_z) / 2.0
+slot_height = slot_top_z - entry_circle_z
+
+
+# ============================================================
+# CHOOSE BACK FACE
+# ============================================================
+
+if FACE_SIDE == "MIN_X":
+    surface_x = min_x
+    inward = 1.0
+
+elif FACE_SIDE == "MAX_X":
+    surface_x = max_x
+    inward = -1.0
+
+else:
+    raise RuntimeError(
+        'FACE_SIDE must be "MIN_X" or "MAX_X".'
+    )
+
+
+# ============================================================
+# MATERIALS
+# ============================================================
+
+def make_material(name, color):
+    material = bpy.data.materials.get(name)
+
+    if material is None:
+        material = bpy.data.materials.new(name)
+
+    material.diffuse_color = color
+    return material
+
+
+outer_material = make_material(
+    "SCREW_OUTER_RED",
+    (1.0, 0.03, 0.03, 1.0)
+)
+
+inner_material = make_material(
+    "SCREW_INNER_CYAN",
+    (0.0, 0.75, 1.0, 1.0)
+)
+
+
+# ============================================================
+# GEOMETRY HELPERS
+# ============================================================
+
+def x_position_for_layer(start_depth, depth):
+    overlap = mm(OVERLAP_MM)
+    total_depth = depth + overlap
+
+    center_x = (
+        surface_x
+        + inward
+        * (
+            start_depth
+            + total_depth / 2.0
+            - overlap / 2.0
+        )
+    )
+
+    return center_x, total_depth
+
+
+def create_x_cylinder(
+    name,
+    y,
+    z,
+    diameter,
+    depth,
+    start_depth,
+    material
+):
+    center_x, total_depth = x_position_for_layer(
+        start_depth,
+        depth
+    )
+
+    bpy.ops.mesh.primitive_cylinder_add(
+        vertices=64,
+        radius=diameter / 2.0,
+        depth=total_depth,
+        location=(
+            center_x,
+            y,
+            z
+        ),
+        rotation=(
+            0.0,
+            radians(90.0),
+            0.0
+        )
+    )
+
+    obj = bpy.context.active_object
+    obj.name = name
+
+    obj.display_type = "WIRE"
+    obj.show_in_front = True
+    obj.color = material.diffuse_color
+    obj.data.materials.append(material)
+
+    move_to_preview_collection(obj)
+
+    return obj
+
+
+def create_x_box(
+    name,
+    y,
+    z,
+    width,
+    height,
+    depth,
+    start_depth,
+    material
+):
+    center_x, total_depth = x_position_for_layer(
+        start_depth,
+        depth
+    )
+
+    bpy.ops.mesh.primitive_cube_add(
+        location=(
+            center_x,
+            y,
+            z
+        )
+    )
+
+    obj = bpy.context.active_object
+    obj.name = name
+
+    obj.dimensions = (
+        total_depth,
+        width,
+        height
+    )
+
+    bpy.ops.object.transform_apply(
+        location=False,
+        rotation=False,
+        scale=True
+    )
+
+    obj.display_type = "WIRE"
+    obj.show_in_front = True
+    obj.color = material.diffuse_color
+    obj.data.materials.append(material)
+
+    move_to_preview_collection(obj)
+
+    return obj
+
+
+# ============================================================
+# CREATE ONE LOCKING KEYHOLE
+# ============================================================
+
+def create_locking_keyhole(
+    side_name,
+    hole_y,
+    entry_diameter,
+    slot_width,
+    top_radius,
+    depth,
+    start_depth,
+    material
+):
+    # --------------------------------------------------------
+    # Large bottom entry circle
+    # --------------------------------------------------------
+
+    create_x_cylinder(
+        name=f"SCREW_{side_name}_ENTRY_CIRCLE",
+        y=hole_y,
+        z=entry_circle_z,
+        diameter=entry_diameter,
+        depth=depth,
+        start_depth=start_depth,
+        material=material
+    )
+
+    # --------------------------------------------------------
+    # Vertical locking channel
+    # Overlaps the large bottom circle
+    # --------------------------------------------------------
+
+    create_x_box(
+        name=f"SCREW_{side_name}_LOCKING_SLOT",
+        y=hole_y,
+        z=slot_center_z,
+        width=slot_width,
+        height=slot_height,
+        depth=depth,
+        start_depth=start_depth,
+        material=material
+    )
+
+    # --------------------------------------------------------
+    # Rounded top of the locking slot
+    # --------------------------------------------------------
+
+    create_x_cylinder(
+        name=f"SCREW_{side_name}_ROUNDED_TOP",
+        y=hole_y,
+        z=slot_top_z,
+        diameter=top_radius * 2.0,
+        depth=depth,
+        start_depth=start_depth,
+        material=material
+    )
+
+
+# ============================================================
+# CREATE LEFT AND RIGHT HOLES
+# ============================================================
+
+hole_positions = [
+    ("LEFT", left_hole_y),
+    ("RIGHT", right_hole_y)
+]
+
+for side_name, hole_y in hole_positions:
+
+    # --------------------------------------------------------
+    # OUTER VISIBLE LAYER
+    # Bottom Ø8 mm entry
+    # Upper 4 mm locking slot
+    # --------------------------------------------------------
+
+    create_locking_keyhole(
+        side_name=f"{side_name}_OUTER",
+        hole_y=hole_y,
+        entry_diameter=mm(OUTER_ENTRY_DIAMETER_MM),
+        slot_width=mm(OUTER_SLOT_WIDTH_MM),
+        top_radius=mm(OUTER_TOP_RADIUS_MM),
+        depth=mm(OUTER_DEPTH_MM),
+        start_depth=0.0,
+        material=outer_material
+    )
+
+    # --------------------------------------------------------
+    # INNER HIDDEN LAYER
+    # Everything is 8 mm wide
+    # Starts behind the 2 mm outer recess
+    # --------------------------------------------------------
+
+    create_locking_keyhole(
+        side_name=f"{side_name}_INNER",
+        hole_y=hole_y,
+        entry_diameter=mm(INNER_ENTRY_DIAMETER_MM),
+        slot_width=mm(INNER_SLOT_WIDTH_MM),
+        top_radius=mm(INNER_TOP_RADIUS_MM),
+        depth=mm(INNER_DEPTH_MM),
+        start_depth=mm(OUTER_DEPTH_MM),
+        material=inner_material
+    )
+
+
+# ============================================================
+# SELECT PREVIEW OBJECTS
+# ============================================================
+
+bpy.ops.object.select_all(action="DESELECT")
+
+for obj in preview_collection.objects:
+    obj.select_set(True)
+
+if len(preview_collection.objects) > 0:
+    bpy.context.view_layer.objects.active = (
+        preview_collection.objects[0]
+    )
+
+
+print("LOCKING SCREW-HOLE PREVIEW CREATED")
+print("OUTER: bottom Ø8 mm entry + upper 4 mm slot")
+print("OUTER DEPTH: 2 mm")
+print("INNER: bottom Ø8 mm entry + upper 8 mm channel")
+print("INNER DEPTH: 4 mm behind the outer recess")
+print("Insert the screw at the bottom and slide the car downward.")
+print("No Boolean cut was performed.")
