@@ -1,0 +1,178 @@
+import bpy
+from mathutils import Vector, Matrix
+
+# =========================================================
+# PREVIEW 3 BOTTOM HANGER HOLES
+#
+# Select the car mesh and run.
+#
+# Hole opening: 6 mm × 6 mm
+# Hole depth:   8 mm
+# =========================================================
+
+PREVIEW_COLLECTION_NAME = "BOTTOM_HOLE_PREVIEW"
+
+HOLE_WIDTH = 0.006       # 6 mm
+HOLE_LENGTH = 0.006      # 6 mm
+HOLE_DEPTH = 0.008       # 8 mm
+
+# Distance between the center hole and each side hole
+HOLE_SPACING = 0.045     # 45 mm
+
+# Small overlap outside the bottom ensures a clean future cut
+BOTTOM_OVERLAP = 0.001   # 1 mm
+
+
+# =========================================================
+# Validate selected car
+# =========================================================
+
+if bpy.context.mode != "OBJECT":
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+car = bpy.context.active_object
+
+if car is None or car.type != "MESH":
+    raise Exception("Select the car mesh before running this script.")
+
+if car.name.startswith("BOTTOM_HOLE_"):
+    raise Exception("Select the car, not a preview hole.")
+
+
+# =========================================================
+# Delete an older preview
+# =========================================================
+
+old_collection = bpy.data.collections.get(PREVIEW_COLLECTION_NAME)
+
+if old_collection is not None:
+    for obj in list(old_collection.objects):
+        bpy.data.objects.remove(obj, do_unlink=True)
+
+    bpy.data.collections.remove(old_collection)
+
+
+# =========================================================
+# Create preview collection
+# =========================================================
+
+preview_collection = bpy.data.collections.new(
+    PREVIEW_COLLECTION_NAME
+)
+
+bpy.context.scene.collection.children.link(
+    preview_collection
+)
+
+
+# =========================================================
+# Find car local bounding box
+# =========================================================
+
+local_corners = [
+    Vector(corner)
+    for corner in car.bound_box
+]
+
+min_x = min(point.x for point in local_corners)
+max_x = max(point.x for point in local_corners)
+
+min_y = min(point.y for point in local_corners)
+max_y = max(point.y for point in local_corners)
+
+min_z = min(point.z for point in local_corners)
+
+car_center_x = (min_x + max_x) / 2
+car_center_y = (min_y + max_y) / 2
+
+
+# =========================================================
+# Hole positions
+# =========================================================
+
+x_positions = [
+    car_center_x - HOLE_SPACING,
+    car_center_x,
+    car_center_x + HOLE_SPACING
+]
+
+# Cutter extends 1 mm below the car and 8 mm upward
+hole_center_z = (
+    min_z
+    + (HOLE_DEPTH / 2)
+    - (BOTTOM_OVERLAP / 2)
+)
+
+actual_cutter_depth = HOLE_DEPTH + BOTTOM_OVERLAP
+
+
+# =========================================================
+# Create three preview cubes
+# =========================================================
+
+for index, x_position in enumerate(x_positions, start=1):
+
+    bpy.ops.mesh.primitive_cube_add(
+        size=1,
+        location=(0, 0, 0)
+    )
+
+    hole = bpy.context.active_object
+    hole.name = f"BOTTOM_HOLE_{index}_PREVIEW"
+
+    # Remove from the automatically selected collection
+    for collection in list(hole.users_collection):
+        collection.objects.unlink(hole)
+
+    preview_collection.objects.link(hole)
+
+    # Dimensions in the car's local coordinate system
+    hole.dimensions = (
+        HOLE_WIDTH,
+        HOLE_LENGTH,
+        actual_cutter_depth
+    )
+
+    bpy.ops.object.transform_apply(
+        location=False,
+        rotation=False,
+        scale=True
+    )
+
+    local_position = Vector((
+        x_position,
+        car_center_y,
+        hole_center_z
+    ))
+
+    hole.matrix_world = (
+        car.matrix_world
+        @ Matrix.Translation(local_position)
+    )
+
+    hole.display_type = "WIRE"
+    hole.show_in_front = True
+    hole.color = (1.0, 0.1, 0.1, 1.0)
+
+    hole["target_car"] = car.name
+    hole["hole_width_mm"] = 6
+    hole["hole_length_mm"] = 6
+    hole["hole_depth_mm"] = 8
+
+
+# =========================================================
+# Select car again
+# =========================================================
+
+bpy.ops.object.select_all(action="DESELECT")
+car.select_set(True)
+bpy.context.view_layer.objects.active = car
+
+print("======================================")
+print("BOTTOM HOLE PREVIEW CREATED")
+print("Quantity: 3")
+print("Opening: 6 × 6 mm")
+print("Depth: 8 mm")
+print("Spacing: 45 mm from center")
+print("Nothing has been cut yet.")
+print("======================================")
