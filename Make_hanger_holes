@@ -1,0 +1,298 @@
+import bpy
+
+# =========================================================
+# CUT 3 BOTTOM HANGER HOLES
+#
+# Requires the existing collection:
+# BOTTOM_HOLE_PREVIEW
+#
+# Select the car mesh before running.
+# =========================================================
+
+PREVIEW_COLLECTION_NAME = "BOTTOM_HOLE_PREVIEW"
+TEMP_CUTTER_NAME = "TEMP_BOTTOM_HOLE_CUTTER"
+BACKUP_SUFFIX = "_BACKUP_BEFORE_BOTTOM_HOLES"
+
+# 0.15 mm voxel resolution
+VOXEL_SIZE = 0.00015
+
+
+# =========================================================
+# Validate selected car
+# =========================================================
+
+if bpy.context.mode != "OBJECT":
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+car = bpy.context.active_object
+
+if car is None or car.type != "MESH":
+    raise Exception(
+        "Select the car mesh before running this script."
+    )
+
+if car.name.startswith("BOTTOM_HOLE_"):
+    raise Exception(
+        "You selected a preview hole. Select the car mesh."
+    )
+
+print("Selected car:", car.name)
+
+
+# =========================================================
+# Find preview collection
+# =========================================================
+
+preview_collection = bpy.data.collections.get(
+    PREVIEW_COLLECTION_NAME
+)
+
+if preview_collection is None:
+    raise Exception(
+        f"Collection '{PREVIEW_COLLECTION_NAME}' was not found. "
+        "Create the bottom-hole preview first."
+    )
+
+preview_parts = [
+    obj
+    for obj in preview_collection.all_objects
+    if obj.type == "MESH"
+]
+
+if not preview_parts:
+    raise Exception(
+        "No mesh cutters were found inside "
+        f"'{PREVIEW_COLLECTION_NAME}'."
+    )
+
+print("Bottom-hole preview pieces found:", len(preview_parts))
+
+
+# =========================================================
+# Remove older temporary cutter
+# =========================================================
+
+old_cutter = bpy.data.objects.get(TEMP_CUTTER_NAME)
+
+if old_cutter is not None:
+    bpy.data.objects.remove(
+        old_cutter,
+        do_unlink=True
+    )
+
+
+# =========================================================
+# Create hidden backup
+# =========================================================
+
+backup_name = car.name + BACKUP_SUFFIX
+
+old_backup = bpy.data.objects.get(backup_name)
+
+if old_backup is not None:
+    bpy.data.objects.remove(
+        old_backup,
+        do_unlink=True
+    )
+
+backup = car.copy()
+backup.data = car.data.copy()
+backup.animation_data_clear()
+backup.name = backup_name
+
+target_collection = (
+    car.users_collection[0]
+    if car.users_collection
+    else bpy.context.collection
+)
+
+target_collection.objects.link(backup)
+
+backup.hide_set(True)
+backup.hide_viewport = True
+backup.hide_render = True
+
+print("Backup created:", backup.name)
+
+
+# =========================================================
+# Duplicate preview cutters
+# =========================================================
+
+temporary_parts = []
+
+for original in preview_parts:
+
+    duplicate = original.copy()
+    duplicate.data = original.data.copy()
+    duplicate.animation_data_clear()
+
+    target_collection.objects.link(duplicate)
+
+    world_matrix = original.matrix_world.copy()
+
+    duplicate.parent = None
+    duplicate.matrix_world = world_matrix
+
+    duplicate.hide_set(False)
+    duplicate.hide_viewport = False
+    duplicate.hide_render = False
+    duplicate.display_type = "SOLID"
+
+    temporary_parts.append(duplicate)
+
+
+# =========================================================
+# Join cutters
+# =========================================================
+
+bpy.ops.object.select_all(action="DESELECT")
+
+for obj in temporary_parts:
+    obj.select_set(True)
+
+bpy.context.view_layer.objects.active = temporary_parts[0]
+
+bpy.ops.object.join()
+
+cutter = bpy.context.active_object
+cutter.name = TEMP_CUTTER_NAME
+
+bpy.ops.object.transform_apply(
+    location=False,
+    rotation=True,
+    scale=True
+)
+
+print("Bottom-hole cutters joined.")
+
+
+# =========================================================
+# Remesh cutter into one solid
+# =========================================================
+
+remesh = cutter.modifiers.new(
+    name="MERGE_BOTTOM_HOLE_CUTTERS",
+    type="REMESH"
+)
+
+remesh.mode = "VOXEL"
+remesh.voxel_size = VOXEL_SIZE
+remesh.use_smooth_shade = False
+
+bpy.context.view_layer.objects.active = cutter
+
+try:
+    bpy.ops.object.modifier_apply(
+        modifier=remesh.name
+    )
+
+except Exception as error:
+    cutter.display_type = "WIRE"
+
+    raise Exception(
+        "The cutter remesh failed. "
+        f"Blender error: {error}"
+    )
+
+print("Bottom-hole cutter remeshed.")
+
+
+# =========================================================
+# Apply Boolean difference
+# =========================================================
+
+bpy.ops.object.select_all(action="DESELECT")
+
+car.hide_set(False)
+car.hide_viewport = False
+car.select_set(True)
+
+bpy.context.view_layer.objects.active = car
+
+boolean = car.modifiers.new(
+    name="BOTTOM_HOLES_BOOLEAN",
+    type="BOOLEAN"
+)
+
+boolean.operation = "DIFFERENCE"
+boolean.solver = "EXACT"
+boolean.object = cutter
+
+if hasattr(boolean, "use_self"):
+    boolean.use_self = False
+
+if hasattr(boolean, "use_hole_tolerant"):
+    boolean.use_hole_tolerant = True
+
+print("Applying bottom-hole Boolean...")
+
+try:
+    bpy.ops.object.modifier_apply(
+        modifier=boolean.name
+    )
+
+except Exception as error:
+
+    cutter.hide_set(False)
+    cutter.hide_viewport = False
+    cutter.display_type = "WIRE"
+
+    raise Exception(
+        "The Boolean failed. The backup and temporary cutter "
+        "were preserved. "
+        f"Blender error: {error}"
+    )
+
+print("Boolean completed.")
+
+
+# =========================================================
+# Remove temporary cutter
+# =========================================================
+
+if cutter.name in bpy.data.objects:
+    bpy.data.objects.remove(
+        cutter,
+        do_unlink=True
+    )
+
+
+# =========================================================
+# Remove original preview objects and collection
+# =========================================================
+
+for obj in list(preview_collection.all_objects):
+    if obj.name in bpy.data.objects:
+        bpy.data.objects.remove(
+            obj,
+            do_unlink=True
+        )
+
+if preview_collection.name in bpy.data.collections:
+    bpy.data.collections.remove(
+        preview_collection
+    )
+
+
+# =========================================================
+# Finish
+# =========================================================
+
+car.data.update()
+
+bpy.ops.object.select_all(action="DESELECT")
+car.select_set(True)
+bpy.context.view_layer.objects.active = car
+
+if not car.name.endswith("_WITH_BOTTOM_HOLES"):
+    car.name += "_WITH_BOTTOM_HOLES"
+
+print("")
+print("======================================")
+print("3 BOTTOM HOLES CUT SUCCESSFULLY")
+print("Hole size: 6 × 6 mm")
+print("Depth: 8 mm")
+print("Finished object:", car.name)
+print("Hidden backup:", backup.name)
+print("======================================")
