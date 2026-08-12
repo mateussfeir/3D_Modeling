@@ -1,0 +1,206 @@
+import bpy
+from mathutils import Vector
+
+# ============================================================
+# CREATE SOLID TUNNEL HOUSINGS FOR TWO KEYHOLES
+# PREVIEW / BUILD ONLY — NO CUT YET
+# ============================================================
+
+CENTER_DISTANCE_MM = 100.0
+
+# Same vertical location logic as your screw-hole preview
+TOP_MARGIN_MM = 18.0
+SLOT_LENGTH_MM = 12.0
+
+# Housing dimensions
+HOUSING_WIDTH_MM = 14.0
+HOUSING_HEIGHT_MM = 26.0
+
+# Total keyhole depth is approx 6 mm.
+# Give the housing extra material behind it.
+HOUSING_DEPTH_MM = 9.0
+
+# Small overlap into the back surface
+SURFACE_OVERLAP_MM = 0.5
+
+FACE_SIDE = "MIN_X"
+
+LEFT_NAME = "KEYHOLE_HOUSING_LEFT"
+RIGHT_NAME = "KEYHOLE_HOUSING_RIGHT"
+
+
+# ============================================================
+# MM CONVERSION
+# ============================================================
+
+scene_scale = bpy.context.scene.unit_settings.scale_length
+
+if scene_scale <= 0:
+    scene_scale = 1.0
+
+def mm(value):
+    return (value / 1000.0) / scene_scale
+
+
+# ============================================================
+# GET SELECTED CAR
+# ============================================================
+
+car = bpy.context.active_object
+
+if car is None or car.type != "MESH":
+    raise RuntimeError("Select BMW_340I_REAR_CUT first.")
+
+if bpy.context.mode != "OBJECT":
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+
+# ============================================================
+# GET WORLD BOUNDS
+# ============================================================
+
+corners = [
+    car.matrix_world @ Vector(corner)
+    for corner in car.bound_box
+]
+
+min_x = min(p.x for p in corners)
+max_x = max(p.x for p in corners)
+
+min_y = min(p.y for p in corners)
+max_y = max(p.y for p in corners)
+
+min_z = min(p.z for p in corners)
+max_z = max(p.z for p in corners)
+
+center_y = (min_y + max_y) / 2.0
+
+left_y = center_y - mm(CENTER_DISTANCE_MM / 2.0)
+right_y = center_y + mm(CENTER_DISTANCE_MM / 2.0)
+
+slot_top_z = max_z - mm(TOP_MARGIN_MM)
+entry_circle_z = slot_top_z - mm(SLOT_LENGTH_MM)
+
+housing_center_z = (
+    slot_top_z + entry_circle_z
+) / 2.0
+
+
+# ============================================================
+# CHOOSE REAR FACE
+# ============================================================
+
+if FACE_SIDE == "MIN_X":
+    surface_x = min_x
+    inward = 1.0
+
+elif FACE_SIDE == "MAX_X":
+    surface_x = max_x
+    inward = -1.0
+
+else:
+    raise RuntimeError(
+        'FACE_SIDE must be "MIN_X" or "MAX_X".'
+    )
+
+
+# ============================================================
+# DELETE OLD HOUSINGS
+# ============================================================
+
+for name in [LEFT_NAME, RIGHT_NAME]:
+    old = bpy.data.objects.get(name)
+
+    if old is not None:
+        bpy.data.objects.remove(
+            old,
+            do_unlink=True
+        )
+
+
+# ============================================================
+# CREATE ONE HOUSING
+# ============================================================
+
+def create_housing(name, y_position):
+
+    depth = mm(HOUSING_DEPTH_MM)
+    overlap = mm(SURFACE_OVERLAP_MM)
+
+    center_x = (
+        surface_x
+        + inward * (
+            depth / 2.0
+            - overlap
+        )
+    )
+
+    bpy.ops.mesh.primitive_cube_add(
+        location=(
+            center_x,
+            y_position,
+            housing_center_z
+        )
+    )
+
+    housing = bpy.context.active_object
+    housing.name = name
+
+    housing.dimensions = (
+        depth,
+        mm(HOUSING_WIDTH_MM),
+        mm(HOUSING_HEIGHT_MM)
+    )
+
+    bpy.ops.object.transform_apply(
+        location=False,
+        rotation=False,
+        scale=True
+    )
+
+    housing.display_type = "WIRE"
+    housing.show_in_front = True
+
+    return housing
+
+
+# ============================================================
+# CREATE BOTH
+# ============================================================
+
+left = create_housing(
+    LEFT_NAME,
+    left_y
+)
+
+right = create_housing(
+    RIGHT_NAME,
+    right_y
+)
+
+
+# ============================================================
+# SELECT HOUSINGS
+# ============================================================
+
+bpy.ops.object.select_all(
+    action="DESELECT"
+)
+
+left.select_set(True)
+right.select_set(True)
+
+bpy.context.view_layer.objects.active = left
+
+
+print("")
+print("======================================")
+print("KEYHOLE TUNNEL HOUSINGS CREATED")
+print("======================================")
+print("Housing width:", HOUSING_WIDTH_MM, "mm")
+print("Housing height:", HOUSING_HEIGHT_MM, "mm")
+print("Housing depth:", HOUSING_DEPTH_MM, "mm")
+print("")
+print("NO CUT HAS BEEN PERFORMED.")
+print("Check that both boxes surround")
+print("the future keyhole positions.")
