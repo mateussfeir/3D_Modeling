@@ -1,0 +1,158 @@
+import bpy
+from mathutils import Vector
+
+# ============================================================
+# SMALL SOLID BACKING ONLY BEHIND SCREW HOLES
+# ============================================================
+
+BACKING_WIDTH_MM = 115.0
+BACKING_HEIGHT_MM = 30.0
+BACKING_DEPTH_MM = 8.0
+
+TOP_MARGIN_MM = 8.0
+OVERLAP_MM = 0.5
+
+FACE_SIDE = "MIN_X"
+
+# ============================================================
+# MM CONVERSION
+# ============================================================
+
+scene_scale = bpy.context.scene.unit_settings.scale_length
+if scene_scale <= 0:
+    scene_scale = 1.0
+
+def mm(v):
+    return (v / 1000.0) / scene_scale
+
+
+# ============================================================
+# GET SELECTED CAR
+# ============================================================
+
+car = bpy.context.active_object
+
+if car is None or car.type != "MESH":
+    raise RuntimeError("Select the car mesh first.")
+
+if bpy.context.mode != "OBJECT":
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+
+# ============================================================
+# WORLD BOUNDS
+# ============================================================
+
+corners = [
+    car.matrix_world @ Vector(corner)
+    for corner in car.bound_box
+]
+
+min_x = min(p.x for p in corners)
+max_x = max(p.x for p in corners)
+
+min_y = min(p.y for p in corners)
+max_y = max(p.y for p in corners)
+
+min_z = min(p.z for p in corners)
+max_z = max(p.z for p in corners)
+
+center_y = (min_y + max_y) / 2.0
+
+
+# ============================================================
+# BACK FACE
+# ============================================================
+
+if FACE_SIDE == "MIN_X":
+    surface_x = min_x
+    inward = 1.0
+else:
+    surface_x = max_x
+    inward = -1.0
+
+
+# ============================================================
+# BACKING POSITION
+# ============================================================
+
+depth = mm(BACKING_DEPTH_MM)
+overlap = mm(OVERLAP_MM)
+
+# Keep it near the upper rear area where your screw holes go
+center_z = max_z - mm(TOP_MARGIN_MM + BACKING_HEIGHT_MM / 2)
+
+center_x = (
+    surface_x
+    + inward * (depth / 2.0 - overlap)
+)
+
+
+# ============================================================
+# CREATE BACKING
+# ============================================================
+
+bpy.ops.mesh.primitive_cube_add(
+    location=(center_x, center_y, center_z)
+)
+
+backing = bpy.context.active_object
+backing.name = "TEMP_KEYHOLE_BACKING"
+
+backing.dimensions = (
+    depth,
+    mm(BACKING_WIDTH_MM),
+    mm(BACKING_HEIGHT_MM)
+)
+
+bpy.ops.object.transform_apply(
+    location=False,
+    rotation=False,
+    scale=True
+)
+
+
+# ============================================================
+# UNION WITH CAR
+# ============================================================
+
+bpy.ops.object.select_all(action="DESELECT")
+
+car.select_set(True)
+bpy.context.view_layer.objects.active = car
+
+boolean = car.modifiers.new(
+    name="ADD_KEYHOLE_BACKING",
+    type="BOOLEAN"
+)
+
+boolean.operation = "UNION"
+boolean.solver = "EXACT"
+boolean.object = backing
+
+if hasattr(boolean, "use_hole_tolerant"):
+    boolean.use_hole_tolerant = True
+
+bpy.ops.object.modifier_apply(
+    modifier=boolean.name
+)
+
+
+# ============================================================
+# DELETE TEMP CUBE
+# ============================================================
+
+bpy.data.objects.remove(backing, do_unlink=True)
+
+car.data.update()
+
+bpy.ops.object.select_all(action="DESELECT")
+car.select_set(True)
+bpy.context.view_layer.objects.active = car
+
+print("======================================")
+print("SMALL KEYHOLE BACKING ADDED")
+print("Width:", BACKING_WIDTH_MM, "mm")
+print("Height:", BACKING_HEIGHT_MM, "mm")
+print("Depth:", BACKING_DEPTH_MM, "mm")
+print("======================================")
