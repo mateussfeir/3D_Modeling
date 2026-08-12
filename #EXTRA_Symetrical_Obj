@@ -1,0 +1,217 @@
+import bpy
+import bmesh
+from mathutils import Vector
+
+# =========================================================
+# FIX SPOILER SYMMETRY
+# Keeps one side and mirrors it across the Y axis
+# =========================================================
+
+obj = bpy.context.active_object
+
+if obj is None or obj.type != 'MESH':
+    raise Exception("Select the spoiler mesh first.")
+
+bpy.context.view_layer.objects.active = obj
+obj.select_set(True)
+
+# Apply scale only
+bpy.ops.object.transform_apply(
+    location=False,
+    rotation=False,
+    scale=True
+)
+
+# =========================================================
+# SETTINGS
+# =========================================================
+
+AXIS = 'Y'
+
+# If it keeps the wrong side, change this to 'NEGATIVE'
+KEEP_SIDE = 'NEGATIVE'
+
+# =========================================================
+# FIND CENTER OF SPOILER
+# =========================================================
+
+verts = obj.data.vertices
+
+if AXIS == 'Y':
+    min_coord = min(v.co.y for v in verts)
+    max_coord = max(v.co.y for v in verts)
+    center = (min_coord + max_coord) / 2
+
+elif AXIS == 'X':
+    min_coord = min(v.co.x for v in verts)
+    max_coord = max(v.co.x for v in verts)
+    center = (min_coord + max_coord) / 2
+
+else:
+    min_coord = min(v.co.z for v in verts)
+    max_coord = max(v.co.z for v in verts)
+    center = (min_coord + max_coord) / 2
+
+print("Center:", center)
+
+# =========================================================
+# CUT MODEL IN HALF
+# =========================================================
+
+bm = bmesh.new()
+bm.from_mesh(obj.data)
+
+geometry = (
+    list(bm.verts) +
+    list(bm.edges) +
+    list(bm.faces)
+)
+
+if AXIS == 'Y':
+    plane_co = Vector((0, center, 0))
+    plane_no = Vector((0, 1, 0))
+
+elif AXIS == 'X':
+    plane_co = Vector((center, 0, 0))
+    plane_no = Vector((1, 0, 0))
+
+else:
+    plane_co = Vector((0, 0, center))
+    plane_no = Vector((0, 0, 1))
+
+
+if KEEP_SIDE == 'POSITIVE':
+
+    bmesh.ops.bisect_plane(
+        bm,
+        geom=geometry,
+        dist=0.000001,
+        plane_co=plane_co,
+        plane_no=plane_no,
+        clear_inner=True,
+        clear_outer=False
+    )
+
+else:
+
+    bmesh.ops.bisect_plane(
+        bm,
+        geom=geometry,
+        dist=0.000001,
+        plane_co=plane_co,
+        plane_no=plane_no,
+        clear_inner=False,
+        clear_outer=True
+    )
+
+
+bm.to_mesh(obj.data)
+bm.free()
+
+obj.data.update()
+
+# =========================================================
+# CREATE MIRROR CENTER EMPTY
+# =========================================================
+
+empty = bpy.data.objects.new(
+    "Spoiler_Mirror_Center",
+    None
+)
+
+bpy.context.collection.objects.link(empty)
+
+# Match spoiler transform
+empty.rotation_euler = obj.rotation_euler
+empty.scale = obj.scale
+
+# Convert local center to world coordinates
+if AXIS == 'Y':
+    local_center = Vector((0, center, 0))
+
+elif AXIS == 'X':
+    local_center = Vector((center, 0, 0))
+
+else:
+    local_center = Vector((0, 0, center))
+
+world_center = obj.matrix_world @ local_center
+
+empty.location = world_center
+
+# =========================================================
+# ADD MIRROR MODIFIER
+# =========================================================
+
+mirror = obj.modifiers.new(
+    name="Perfect_Symmetry",
+    type='MIRROR'
+)
+
+mirror.use_axis[0] = False
+mirror.use_axis[1] = False
+mirror.use_axis[2] = False
+
+if AXIS == 'X':
+    mirror.use_axis[0] = True
+
+elif AXIS == 'Y':
+    mirror.use_axis[1] = True
+
+else:
+    mirror.use_axis[2] = True
+
+
+mirror.use_clip = True
+mirror.use_mirror_merge = True
+
+mirror.merge_threshold = 0.001
+
+mirror.mirror_object = empty
+
+# =========================================================
+# APPLY MIRROR
+# =========================================================
+
+bpy.context.view_layer.objects.active = obj
+
+bpy.ops.object.modifier_apply(
+    modifier=mirror.name
+)
+
+# =========================================================
+# WELD CENTER
+# =========================================================
+
+bm = bmesh.new()
+bm.from_mesh(obj.data)
+
+bmesh.ops.remove_doubles(
+    bm,
+    verts=list(bm.verts),
+    dist=0.001
+)
+
+bm.to_mesh(obj.data)
+bm.free()
+
+obj.data.update()
+
+# =========================================================
+# SMOOTH SHADING
+# Does NOT reshape geometry
+# =========================================================
+
+for polygon in obj.data.polygons:
+    polygon.use_smooth = True
+
+# =========================================================
+# REMOVE MIRROR EMPTY
+# =========================================================
+
+bpy.data.objects.remove(
+    empty,
+    do_unlink=True
+)
+
+print("DONE — Spoiler mirrored symmetrically across Y axis.")
