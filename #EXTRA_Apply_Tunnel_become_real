@@ -1,0 +1,92 @@
+import bpy
+
+CAR_NAME = "BMW_340I_REAR_CUT"
+LEFT_NAME = "KEYHOLE_HOUSING_LEFT"
+RIGHT_NAME = "KEYHOLE_HOUSING_RIGHT"
+
+BACKUP_SUFFIX = "_BACKUP_BEFORE_TUNNEL_JOIN"
+
+car = bpy.data.objects.get(CAR_NAME)
+left = bpy.data.objects.get(LEFT_NAME)
+right = bpy.data.objects.get(RIGHT_NAME)
+
+if car is None:
+    raise RuntimeError(f"Could not find {CAR_NAME}")
+
+if left is None or right is None:
+    raise RuntimeError("Could not find both keyhole housings.")
+
+if bpy.context.mode != "OBJECT":
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+
+# ------------------------------------------------------------
+# CREATE BACKUP
+# ------------------------------------------------------------
+
+backup_name = car.name + BACKUP_SUFFIX
+
+old_backup = bpy.data.objects.get(backup_name)
+
+if old_backup is not None:
+    bpy.data.objects.remove(old_backup, do_unlink=True)
+
+backup = car.copy()
+backup.data = car.data.copy()
+backup.name = backup_name
+backup.matrix_world = car.matrix_world.copy()
+
+if car.users_collection:
+    car.users_collection[0].objects.link(backup)
+else:
+    bpy.context.collection.objects.link(backup)
+
+backup.hide_set(True)
+backup.hide_viewport = True
+backup.hide_render = True
+
+
+# ------------------------------------------------------------
+# JOIN HOUSINGS TO CAR
+# ------------------------------------------------------------
+
+bpy.ops.object.select_all(action="DESELECT")
+
+car.hide_set(False)
+car.hide_viewport = False
+
+left.hide_set(False)
+left.hide_viewport = False
+
+right.hide_set(False)
+right.hide_viewport = False
+
+car.select_set(True)
+left.select_set(True)
+right.select_set(True)
+
+bpy.context.view_layer.objects.active = car
+
+bpy.ops.object.join()
+
+car.data.update()
+
+car.name = "BMW_340I_REAR_CUT_WITH_TUNNELS"
+
+
+# ------------------------------------------------------------
+# FINISH
+# ------------------------------------------------------------
+
+bpy.ops.object.select_all(action="DESELECT")
+car.select_set(True)
+bpy.context.view_layer.objects.active = car
+
+print("")
+print("======================================")
+print("TUNNEL HOUSINGS JOINED TO BMW")
+print("======================================")
+print("Finished object:", car.name)
+print("Backup:", backup.name)
+print("")
+print("No keyholes were cut yet.")
