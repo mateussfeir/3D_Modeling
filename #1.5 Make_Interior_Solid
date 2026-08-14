@@ -1,0 +1,122 @@
+import bpy
+
+# ============================================================
+# MAKE MESHY CAR SOLID / WATERTIGHT
+# Select ONLY the car before running this script.
+# Run this BEFORE cutting screw holes.
+# ============================================================
+
+car = bpy.context.active_object
+
+if car is None or car.type != 'MESH':
+    raise RuntimeError("Select the CAR mesh first.")
+
+# ------------------------------------------------------------
+# 1. MAKE BACKUP
+# ------------------------------------------------------------
+
+backup = car.copy()
+backup.data = car.data.copy()
+backup.name = car.name + "_BACKUP_BEFORE_SOLID_FIX"
+
+bpy.context.collection.objects.link(backup)
+
+backup.hide_set(True)
+backup.hide_render = True
+
+
+# ------------------------------------------------------------
+# 2. APPLY SCALE
+# ------------------------------------------------------------
+
+bpy.context.view_layer.objects.active = car
+car.select_set(True)
+
+bpy.ops.object.transform_apply(
+    location=False,
+    rotation=False,
+    scale=True
+)
+
+
+# ------------------------------------------------------------
+# 3. REMOVE DOUBLES / BASIC CLEANUP
+# ------------------------------------------------------------
+
+bpy.ops.object.mode_set(mode='EDIT')
+bpy.ops.mesh.select_all(action='SELECT')
+
+# Merge vertices that are essentially on top of each other
+bpy.ops.mesh.remove_doubles(threshold=0.00001)
+
+bpy.ops.mesh.normals_make_consistent(inside=False)
+
+bpy.ops.object.mode_set(mode='OBJECT')
+
+
+# ------------------------------------------------------------
+# 4. CALCULATE VOXEL SIZE AUTOMATICALLY
+#
+# About 0.2% of the largest dimension.
+# For an ~180 mm car this is approximately 0.36 mm.
+# ------------------------------------------------------------
+
+largest_dimension = max(car.dimensions)
+
+voxel_size = largest_dimension * 0.002
+
+print("Largest car dimension:", largest_dimension)
+print("Voxel size:", voxel_size)
+
+
+# ------------------------------------------------------------
+# 5. VOXEL REMESH
+# This rebuilds the hollow Meshy shell as a continuous volume.
+# ------------------------------------------------------------
+
+car.data.remesh_voxel_size = voxel_size
+car.data.remesh_voxel_adaptivity = 0.0
+
+bpy.context.view_layer.objects.active = car
+
+bpy.ops.object.mode_set(mode='SCULPT')
+
+bpy.ops.object.voxel_remesh()
+
+bpy.ops.object.mode_set(mode='OBJECT')
+
+
+# ------------------------------------------------------------
+# 6. RECALCULATE NORMALS AFTER REMESH
+# ------------------------------------------------------------
+
+bpy.ops.object.mode_set(mode='EDIT')
+bpy.ops.mesh.select_all(action='SELECT')
+bpy.ops.mesh.normals_make_consistent(inside=False)
+bpy.ops.object.mode_set(mode='OBJECT')
+
+
+# ------------------------------------------------------------
+# 7. RENAME FIXED MODEL
+# ------------------------------------------------------------
+
+original_name = car.name
+
+if "_SOLID" not in original_name:
+    car.name = original_name + "_SOLID"
+
+
+# ------------------------------------------------------------
+# DONE
+# ------------------------------------------------------------
+
+print("")
+print("==========================================")
+print("SOLID FIX COMPLETE")
+print("==========================================")
+print("Fixed object:", car.name)
+print("Backup:", backup.name)
+print("Voxel size:", voxel_size)
+print("")
+print("Now cut the screw holes into THIS solid version.")
+print("==========================================")
