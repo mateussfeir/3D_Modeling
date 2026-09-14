@@ -1,0 +1,158 @@
+import bpy
+import math
+
+# ============================================================
+# HALF-WHEEL RIM / TIRE CUT PREVIEW
+#
+# Select ONE half-wheel and run.
+#
+# Creates a wireframe cylinder showing where
+# the rim will be separated from the tire.
+#
+# NOTHING IS CUT.
+# ============================================================
+
+
+# ============================================================
+# SETTINGS
+# ============================================================
+
+# Change this until the circle follows the outside edge
+# of the metal rim.
+RIM_DIAMETER = 0.030     # 30 mm
+
+# Your wheel faces front, so depth should be Y.
+AXIS = "Y"
+
+# Extra depth so preview passes completely through wheel.
+EXTRA_DEPTH = 0.020
+
+PREVIEW_NAME = "RIM_TIRE_CUT_PREVIEW"
+
+
+# ============================================================
+# VALIDATE SELECTION
+# ============================================================
+
+if bpy.context.mode != "OBJECT":
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+wheel = bpy.context.active_object
+
+if wheel is None or wheel.type != "MESH":
+    raise Exception("Select ONE half-wheel mesh first.")
+
+
+# ============================================================
+# REMOVE OLD PREVIEW
+# ============================================================
+
+old_preview = bpy.data.objects.get(PREVIEW_NAME)
+
+if old_preview:
+    bpy.data.objects.remove(
+        old_preview,
+        do_unlink=True
+    )
+
+
+# ============================================================
+# HELPERS
+# ============================================================
+
+def get_axis_depth(obj):
+
+    if AXIS == "X":
+        return obj.dimensions.x
+
+    elif AXIS == "Y":
+        return obj.dimensions.y
+
+    elif AXIS == "Z":
+        return obj.dimensions.z
+
+    else:
+        raise Exception("AXIS must be X, Y or Z.")
+
+
+def get_rotation():
+
+    # Blender cylinders are created along Z.
+
+    if AXIS == "X":
+        return (0, math.radians(90), 0)
+
+    elif AXIS == "Y":
+        return (math.radians(90), 0, 0)
+
+    return (0, 0, 0)
+
+
+# ============================================================
+# GET WHEEL INFORMATION
+# ============================================================
+
+# Your half-wheel should retain the original wheel origin,
+# so this should still represent the center of the wheel.
+center = wheel.matrix_world.translation.copy()
+
+wheel_depth = get_axis_depth(wheel)
+
+preview_depth = (
+    wheel_depth +
+    EXTRA_DEPTH
+)
+
+rim_radius = RIM_DIAMETER / 2
+
+
+# ============================================================
+# CREATE PREVIEW CYLINDER
+# ============================================================
+
+bpy.ops.mesh.primitive_cylinder_add(
+    vertices=128,
+    radius=rim_radius,
+    depth=preview_depth,
+    location=center,
+    rotation=get_rotation()
+)
+
+preview = bpy.context.object
+preview.name = PREVIEW_NAME
+
+
+# ============================================================
+# MAKE IT A VISIBLE WIREFRAME
+# ============================================================
+
+preview.display_type = "WIRE"
+preview.show_in_front = True
+
+
+# ============================================================
+# SELECT ORIGINAL HALF-WHEEL AGAIN
+# ============================================================
+
+bpy.ops.object.select_all(action="DESELECT")
+
+wheel.select_set(True)
+bpy.context.view_layer.objects.active = wheel
+
+
+# ============================================================
+# DONE
+# ============================================================
+
+print("")
+print("======================================")
+print(" RIM / TIRE CUT PREVIEW")
+print("======================================")
+print("")
+print(f"Rim diameter: {RIM_DIAMETER * 1000:.2f} mm")
+print("")
+print("Nothing has been cut.")
+print("")
+print("Adjust RIM_DIAMETER until the")
+print("preview circle matches the rim/tire boundary.")
+print("")
