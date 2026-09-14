@@ -1,0 +1,148 @@
+import bpy
+
+# =========================================================
+# APPLY WHEEL HALF CUT
+#
+# REQUIREMENTS:
+# - Original wheel selected
+# - WHEEL_HALF_CUT_PREVIEW still exists
+#
+# Creates:
+#   WHEEL_LEFT
+#   WHEEL_RIGHT
+#
+# Original wheel is preserved and hidden.
+# =========================================================
+
+PREVIEW_NAME = "WHEEL_HALF_CUT_PREVIEW"
+
+
+# =========================================================
+# Validate
+# =========================================================
+
+if bpy.context.mode != "OBJECT":
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+wheel = bpy.context.active_object
+
+if wheel is None or wheel.type != "MESH":
+    raise Exception("Select the ORIGINAL wheel mesh first.")
+
+preview = bpy.data.objects.get(PREVIEW_NAME)
+
+if preview is None:
+    raise Exception(
+        "WHEEL_HALF_CUT_PREVIEW was not found. "
+        "Run the preview script first."
+    )
+
+
+# =========================================================
+# Helper
+# =========================================================
+
+def select_only(obj):
+    bpy.ops.object.select_all(action="DESELECT")
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+
+
+def apply_boolean(target, cutter, operation):
+    select_only(target)
+
+    modifier = target.modifiers.new(
+        name="HALF_CUT",
+        type="BOOLEAN"
+    )
+
+    modifier.operation = operation
+    modifier.solver = "EXACT"
+    modifier.object = cutter
+
+    bpy.ops.object.modifier_apply(
+        modifier=modifier.name
+    )
+
+
+# =========================================================
+# Duplicate wheel twice
+# =========================================================
+
+left = wheel.copy()
+left.data = wheel.data.copy()
+bpy.context.collection.objects.link(left)
+left.name = "WHEEL_LEFT"
+
+
+right = wheel.copy()
+right.data = wheel.data.copy()
+bpy.context.collection.objects.link(right)
+right.name = "WHEEL_RIGHT"
+
+
+# =========================================================
+# LEFT HALF
+#
+# Keep everything INSIDE preview box
+# =========================================================
+
+apply_boolean(
+    left,
+    preview,
+    "INTERSECT"
+)
+
+
+# =========================================================
+# RIGHT HALF
+#
+# Remove everything inside preview box
+# =========================================================
+
+apply_boolean(
+    right,
+    preview,
+    "DIFFERENCE"
+)
+
+
+# =========================================================
+# Hide original wheel
+# =========================================================
+
+wheel.hide_set(True)
+wheel.hide_render = True
+
+
+# =========================================================
+# Hide preview
+# =========================================================
+
+preview.hide_set(True)
+preview.hide_render = True
+
+
+# =========================================================
+# Select both new halves
+# =========================================================
+
+bpy.ops.object.select_all(action="DESELECT")
+
+left.select_set(True)
+right.select_set(True)
+
+bpy.context.view_layer.objects.active = left
+
+
+print("")
+print("======================================")
+print(" WHEEL CUT COMPLETE")
+print("======================================")
+print("")
+print("Created:")
+print("  WHEEL_LEFT")
+print("  WHEEL_RIGHT")
+print("")
+print("Original wheel preserved and hidden.")
+print("")
